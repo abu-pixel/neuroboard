@@ -1,0 +1,355 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>NeuroBoard — Personal Knowledge OS (Starter)</title>
+<style>
+  :root{ --bg:#071126; --panel:#081426; --muted:#9fb0c8; --accent:#00d4ff; --node:#35c0a8; --glass: rgba(255,255,255,0.03);} 
+  [data-theme='light']{ --bg:#f6f9fc; --panel:#ffffff; --muted:#475569; --accent:#0ea5ff; --node:#0369a1; --glass: rgba(0,0,0,0.04);} 
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0;font-family:Inter,ui-sans-serif,system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial;color:var(--muted);background:var(--bg)}
+  .app{height:100vh;display:grid;grid-template-columns:300px 1fr 420px;gap:12px;padding:14px}
+  .panel{background:linear-gradient(180deg,var(--panel),rgba(255,255,255,0.02));border-radius:12px;padding:12px;box-shadow:0 8px 30px rgba(2,6,23,0.6)}
+  header{display:flex;align-items:center;gap:10px}
+  h1{color:var(--accent);font-size:16px;margin:0}
+  .left{overflow:auto}
+  .controls{display:flex;gap:8px;margin-top:10px}
+  input,textarea,select{width:100%;padding:8px;border-radius:8px;border:1px solid rgba(255,255,255,0.04);background:var(--glass);color:inherit}
+  button{padding:8px 10px;border-radius:8px;border:none;background:var(--accent);color:#021124;cursor:pointer}
+  .list{margin-top:12px}
+  .item{padding:8px;border-radius:8px;margin-bottom:8px;background:rgba(255,255,255,0.02);cursor:pointer;display:flex;justify-content:space-between;gap:8px}
+  .item:hover{outline:2px solid rgba(0,212,255,0.08)}
+  .stage{position:relative;height:calc(100vh - 40px);overflow:hidden}
+  #canvas{display:block;width:100%;height:100%;background:linear-gradient(180deg, rgba(255,255,255,0.01), transparent)}
+  .node{position:absolute;padding:10px 12px;border-radius:12px;background:linear-gradient(180deg,var(--node),rgba(255,255,255,0.03));color:#021124;min-width:120px;cursor:grab;user-select:none;box-shadow:0 10px 30px rgba(2,6,23,0.6)}
+  .node .title{font-weight:700}
+  .node .meta{font-size:12px;opacity:0.85}
+  .editor{height:calc(100vh - 40px);overflow:auto}
+  .editor textarea{height:50%;resize:vertical}
+  .preview{height:45%;overflow:auto;padding:8px;border-radius:8px;background:rgba(255,255,255,0.02);margin-top:8px}
+  .toolbar{display:flex;gap:8px;align-items:center}
+  .search{display:flex;gap:8px}
+  .tag{padding:4px 8px;border-radius:999px;background:rgba(255,255,255,0.02);font-size:12px}
+  .timeline{margin-top:10px}
+  .timeline .row{padding:6px;border-radius:8px;background:rgba(255,255,255,0.02);margin-bottom:6px}
+  .small{padding:6px 8px;font-size:13px}
+  .ghost{opacity:0.45}
+  .highlight{outline:3px solid rgba(0,212,255,0.14);transform:scale(1.02)}
+  @media (max-width:1100px){.app{grid-template-columns:1fr;grid-auto-rows:auto}.editor{order:3}.left{order:2}}
+</style>
+</head>
+<body data-theme="dark">
+  <div class="app">
+    <!-- LEFT: Nodes list, search, quick actions -->
+    <aside class="panel left">
+      <header>
+        <h1>NeuroBoard</h1>
+        <div style="margin-left:auto" class="tag">Local • No backend</div>
+      </header>
+
+      <div class="controls">
+        <input id="q" placeholder="Search notes, tags, content" />
+        <button id="newBtn" class="small">New (N)</button>
+      </div>
+
+      <div style="margin-top:10px;display:flex;gap:8px">
+        <button id="exportBtn">Export</button>
+        <button id="importBtn">Import</button>
+        <button id="autosaveToggle" class="small">AutoSave: ON</button>
+      </div>
+
+      <div style="margin-top:12px;display:flex;gap:8px;align-items:center">
+        <label style="font-size:13px">View</label>
+        <select id="viewMode"><option value="graph">Graph</option><option value="timeline">Timeline</option></select>
+      </div>
+
+      <div class="list" id="notesList"></div>
+
+      <hr style="border:none;height:1px;background:rgba(255,255,255,0.03);margin-top:14px" />
+
+      <div>
+        <div style="display:flex;justify-content:space-between;align-items:center"><strong style="color:var(--muted)">Quick Tips</strong><div class="tag">Extreme build</div></div>
+        <ul style="font-size:13px;color:var(--muted)">
+          <li>Keyboard: N = new note, Del = delete selected, Ctrl/Cmd+S = export</li>
+          <li>Drag nodes in graph. Double-click to create node at cursor.</li>
+          <li>Use tags in the editor like <code>#javascript</code> to tag a note.</li>
+        </ul>
+      </div>
+
+    </aside>
+
+    <!-- CENTER: Graph canvas / timeline -->
+    <main class="panel stage">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+        <div class="toolbar">
+          <button id="fitBtn" class="small">Fit</button>
+          <button id="layoutBtn" class="small">Run Layout</button>
+          <button id="connectBtn" class="small">Connect Mode</button>
+          <div style="margin-left:12px">Scale: <span id="scaleLabel">1.00</span></div>
+        </div>
+        <div style="margin-left:auto" class="search">Selected: <span id="selLabel">—</span></div>
+      </div>
+      <canvas id="canvas"></canvas>
+      <div id="svgLinks" style="position:absolute;inset:0;pointer-events:none"></div>
+    </main>
+
+    <!-- RIGHT: Editor, preview, timeline -->
+    <aside class="panel editor">
+      <div style="display:flex;gap:8px;align-items:center">
+        <div style="font-weight:700">Editor</div>
+        <div style="margin-left:auto;display:flex;gap:8px">
+          <button id="saveNote" class="small">Save</button>
+          <button id="deleteNote" class="small">Delete</button>
+          <button id="aiSuggest" class="small">Assist</button>
+        </div>
+      </div>
+
+      <input id="noteTitle" placeholder="Note title" style="margin-top:8px" />
+      <textarea id="noteContent" placeholder="Write your note in markdown..." style="margin-top:8px"></textarea>
+      <div style="display:flex;gap:8px;margin-top:8px;align-items:center">
+        <input id="noteTags" placeholder="tags: #javascript #algorithms" />
+        <input id="noteColor" placeholder="accent color e.g. #ff8800" style="width:140px" />
+      </div>
+
+      <div class="preview" id="previewArea"></div>
+
+      <div class="timeline" id="timelineArea" style="display:none"></div>
+
+    </aside>
+  </div>
+
+<script>
+/* ------------------ Core data model ------------------ */
+const DB_KEY = 'neuroboard.v1';
+let state = { notes: [], links: [], nextId: 1, selectedId: null, view: 'graph', autosave: true };
+let autosaveTimer = null;
+
+/* ---------- Utilities ---------- */
+function now(){ return new Date().toISOString(); }
+function uid(){ return state.nextId++; }
+function saveToLocal(){ localStorage.setItem(DB_KEY, JSON.stringify(state)); }
+function loadFromLocal(){ const raw = localStorage.getItem(DB_KEY); if(!raw) return false; try{ state = JSON.parse(raw); if(!state.nextId) state.nextId = (Math.max(0,...state.notes.map(n=>n.id))+1)||1; return true;}catch(e){console.error(e); return false;} }
+function exportJSON(){ const blob = new Blob([JSON.stringify(state,null,2)],{type:'application/json'}); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href=url; a.download='neuroboard-export.json'; a.click(); URL.revokeObjectURL(url); }
+function importJSON(json){ try{ const data = JSON.parse(json); if(!Array.isArray(data.notes)) throw new Error('Invalid'); state = data; if(!state.nextId) state.nextId = (Math.max(0,...state.notes.map(n=>n.id))+1)||1; renderAll(); }catch(e){alert('Import failed: '+e.message);} }
+
+/* ---------- DOM refs ---------- */
+const qInput = document.getElementById('q');
+const notesList = document.getElementById('notesList');
+const newBtn = document.getElementById('newBtn');
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const selLabel = document.getElementById('selLabel');
+const noteTitle = document.getElementById('noteTitle');
+const noteContent = document.getElementById('noteContent');
+const noteTags = document.getElementById('noteTags');
+const noteColor = document.getElementById('noteColor');
+const saveNoteBtn = document.getElementById('saveNote');
+const deleteNoteBtn = document.getElementById('deleteNote');
+const exportBtn = document.getElementById('exportBtn');
+const importBtn = document.getElementById('importBtn');
+const previewArea = document.getElementById('previewArea');
+const timelineArea = document.getElementById('timelineArea');
+const viewMode = document.getElementById('viewMode');
+const autosaveToggle = document.getElementById('autosaveToggle');
+const layoutBtn = document.getElementById('layoutBtn');
+const fitBtn = document.getElementById('fitBtn');
+const connectBtn = document.getElementById('connectBtn');
+const aiSuggestBtn = document.getElementById('aiSuggest');
+const aiMode = {on:false};
+
+/* ---------- Canvas / graph state ---------- */
+let cam = {x:0,y:0,scale:1};
+let dragging = null;
+let dragOffset = {x:0,y:0};
+let connectMode = false;
+let lastPointer = {x:0,y:0};
+let runningLayout = false;
+
+/* ---------- Simple inverted index for search ---------- */
+let index = {};
+function buildIndex(){ index = {}; state.notes.forEach(n=>{ const content = (n.title + ' ' + (n.content||'') + ' ' + (n.tags||'')).toLowerCase(); const tokens = content.match(/\w+/g)||[]; const uniq = new Set(tokens); uniq.forEach(t=>{ if(!index[t]) index[t]=new Set(); index[t].add(n.id); }); }); }
+function search(q){ if(!q) return state.notes.map(n=>n.id); const tokens = q.toLowerCase().match(/\w+/g)||[]; if(tokens.length===0) return []; let res = null; tokens.forEach(t=>{ const s = index[t] ? Array.from(index[t]) : []; if(res===null) res = new Set(s); else res = new Set(s.filter(x=>res.has(x))); }); return res ? Array.from(res) : []; }
+
+/* ---------- Render list & editor ---------- */
+function renderNotesList(filterQ=''){
+  notesList.innerHTML='';
+  const ids = filterQ ? search(filterQ) : state.notes.map(n=>n.id);
+  const items = state.notes.filter(n=>ids.includes(n.id)).sort((a,b)=> new Date(b.updated||b.created) - new Date(a.updated||a.created));
+  items.forEach(n=>{
+    const el = document.createElement('div'); el.className='item'; el.dataset.id=n.id;
+    el.innerHTML = `<div><div style="font-weight:700;color:var(--accent)">${escapeHtml(n.title||'Untitled')}</div><div style="font-size:12px">${(n.tags||'').slice(0,120)}</div></div><div style="text-align:right"><div style="font-size:12px;opacity:0.8">${n.updated? 'Updated':'Created'} ${new Date(n.updated||n.created).toLocaleString()}</div><div style="height:6px"></div></div>`;
+    el.addEventListener('click', ()=> selectNote(n.id));
+    notesList.appendChild(el);
+  });
+}
+function escapeHtml(s){ return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+function selectNote(id){ const note = state.notes.find(x=>x.id===id); if(!note) return; state.selectedId = id; selLabel.textContent = note.title||('('+id+')'); noteTitle.value = note.title||''; noteContent.value = note.content||''; noteTags.value = note.tags||''; noteColor.value = note.color||''; renderPreview(); highlightSelection(); }
+function clearSelection(){ state.selectedId = null; selLabel.textContent='—'; noteTitle.value=''; noteContent.value=''; noteTags.value=''; noteColor.value=''; renderPreview(); highlightSelection(); }
+
+/* ---------- Notes CRUD ---------- */
+function createNote(x= (Math.random()*800)-400, y=(Math.random()*400)-200, title='New Note'){
+  const id = uid(); const nowt = now(); const note = { id, title, content:'', tags:'', color:'#35c0a8', x, y, vx:0, vy:0, created:nowt, updated:nowt };
+  state.notes.push(note); buildIndex(); renderNotesList(qInput.value); saveIfAuto(); return note;
+}
+function saveNote(){ if(!state.selectedId) return alert('No note selected'); const note = state.notes.find(n=>n.id===state.selectedId); note.title = noteTitle.value; note.content = noteContent.value; note.tags = noteTags.value; note.color = noteColor.value || note.color; note.updated = now(); buildIndex(); renderNotesList(qInput.value); saveIfAuto(); }
+function deleteNote(){ if(!state.selectedId) return alert('No note selected'); if(!confirm('Delete selected note?')) return; const idx = state.notes.findIndex(n=>n.id===state.selectedId); if(idx>=0) state.notes.splice(idx,1); // remove links
+  state.links = state.links.filter(l=> l.from!==state.selectedId && l.to!==state.selectedId);
+  state.selectedId = null; buildIndex(); renderAll(); saveIfAuto(); }
+
+/* ---------- Simple markdown renderer (very light) ---------- */
+function renderPreview(){ const md = noteContent.value || ''; previewArea.innerHTML = simpleMarkdown(md); }
+function simpleMarkdown(md){ // not full markdown, basic
+  let html = md
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/^### (.*$)/gim,'<h3>$1</h3>')
+    .replace(/^## (.*$)/gim,'<h2>$1</h2>')
+    .replace(/^# (.*$)/gim,'<h1>$1</h1>')
+    .replace(/\*\*(.*?)\*\*/gim,'<strong>$1</strong>')
+    .replace(/\*(.*?)\*/gim,'<em>$1</em>')
+    .replace(/`([^`]+)`/gim,'<code>$1</code>')
+    .replace(/\n/g,'<br/>');
+  return html;
+}
+
+/* ---------- Canvas rendering (nodes + links) ---------- */
+function resizeCanvas(){ const r = canvas.getBoundingClientRect(); canvas.width = Math.floor(r.width * devicePixelRatio); canvas.height = Math.floor(r.height * devicePixelRatio); canvas.style.width = r.width+'px'; canvas.style.height = r.height+'px'; ctx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0); }
+
+function worldToScreen(x,y){ return { x: (x + cam.x) * cam.scale + canvas.clientWidth/2, y: (y + cam.y) * cam.scale + canvas.clientHeight/2 }; }
+function screenToWorld(x,y){ return { x: (x - canvas.clientWidth/2)/cam.scale - cam.x, y: (y - canvas.clientHeight/2)/cam.scale - cam.y }; }
+
+function draw(){ ctx.clearRect(0,0,canvas.width,canvas.height);
+  // links
+  ctx.lineWidth = 2; ctx.strokeStyle='rgba(255,255,255,0.08)';
+  state.links.forEach(l=>{
+    const a = state.notes.find(n=>n.id===l.from); const b = state.notes.find(n=>n.id===l.to); if(!a||!b) return;
+    const A = worldToScreen(a.x,a.y); const B = worldToScreen(b.x,b.y);
+    ctx.beginPath(); ctx.moveTo(A.x,A.y); // curved
+    const cx = (A.x + B.x)/2; const cy = (A.y + B.y)/2 - 40;
+    ctx.quadraticCurveTo(cx,cy,B.x,B.y); ctx.stroke();
+  });
+  // nodes
+  state.notes.forEach(n=>{
+    const p = worldToScreen(n.x,n.y);
+    // shadow
+    ctx.beginPath(); ctx.fillStyle='rgba(0,0,0,0.25)'; ctx.ellipse(p.x+6,p.y+12,60,28,0,0,Math.PI*2); ctx.fill();
+    // box
+    const w = 180, h = 56;
+    ctx.beginPath(); roundRect(ctx,p.x-w/2,p.y-h/2,w,h,12);
+    // fill
+    ctx.fillStyle = n.color || getComputedStyle(document.documentElement).getPropertyValue('--node').trim(); ctx.fill();
+    // title
+    ctx.fillStyle = '#021124'; ctx.font = '600 14px system-ui, Arial'; ctx.textAlign='center'; ctx.fillText(n.title||'Untitled', p.x, p.y - 4);
+    ctx.font = '12px system-ui, Arial'; ctx.fillStyle='rgba(2,6,23,0.65)'; ctx.fillText((n.tags||'').split(' ').slice(0,3).join(' '), p.x, p.y + 16);
+    // highlight selected
+    if(state.selectedId===n.id){ ctx.strokeStyle='rgba(0,212,255,0.25)'; ctx.lineWidth=4; ctx.stroke(); }
+  });
+}
+
+function roundRect(ctx,x,y,w,h,r){ ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r); ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath(); }
+
+/* ---------- Simple force-directed layout ---------- */
+function stepLayout(){ const kRepel = 120000; const kSpring = 0.06; const damping = 0.85; state.notes.forEach(n=>{ n.vx = (n.vx||0); n.vy = (n.vy||0); });
+  // repulsion
+  for(let i=0;i<state.notes.length;i++){ for(let j=i+1;j<state.notes.length;j++){ const a=state.notes[i]; const b=state.notes[j]; let dx = a.x - b.x; let dy = a.y - b.y; let d2 = dx*dx + dy*dy + 0.01; let d = Math.sqrt(d2); let force = kRepel / d2; a.vx += (dx / d) * force; a.vy += (dy / d) * force; b.vx -= (dx / d) * force; b.vy -= (dy / d) * force; }}
+  // springs
+  state.links.forEach(l=>{ const a = state.notes.find(n=>n.id===l.from); const b = state.notes.find(n=>n.id===l.to); if(!a||!b) return; let dx = b.x - a.x; let dy = b.y - a.y; let d = Math.sqrt(dx*dx+dy*dy)+0.01; let force = (d - 200) * kSpring; let fx = (dx/d)*force; let fy=(dy/d)*force; a.vx += fx; a.vy += fy; b.vx -= fx; b.vy -= fy; });
+  // integrate
+  state.notes.forEach(n=>{ n.vx *= damping; n.vy *= damping; n.x += n.vx*0.02; n.y += n.vy*0.02; });
+}
+
+/* ---------- Interaction handling ---------- */
+function onPointerDown(e){ const pos = {x: e.clientX, y: e.clientY}; lastPointer = pos; const w = screenToWorld(pos.x,pos.y); // find node under cursor
+  const hit = state.notes.find(n=>{ const dx = n.x - w.x; const dy = n.y - w.y; return dx*dx + dy*dy < 100*100; });
+  if(e.button===0){ if(hit){ dragging = hit; dragOffset.x = hit.x - w.x; dragOffset.y = hit.y - w.y; state.selectedId = hit.id; selectNote(hit.id); } else { if(e.detail===2){ // double click -> new node at world pos
+      const n = createNote(w.x,w.y,'New Idea'); state.selectedId = n.id; selectNote(n.id); }
+    else { state.selectedId = null; clearSelection(); }} }
+  if(e.button===2){ // right-click to pan
+    canvas.style.cursor='grabbing'; canvas.dataset.panning = '1'; dragOffset.x = pos.x; dragOffset.y = pos.y; }
+}
+function onPointerMove(e){ const pos = {x:e.clientX,y:e.clientY}; if(canvas.dataset.panning==='1'){ const dx = (pos.x - dragOffset.x)/cam.scale; const dy = (pos.y - dragOffset.y)/cam.scale; cam.x += dx; cam.y += dy; dragOffset.x = pos.x; dragOffset.y = pos.y; } if(dragging){ const w = screenToWorld(pos.x,pos.y); dragging.x = w.x + dragOffset.x; dragging.y = w.y + dragOffset.y; } }
+function onPointerUp(e){ dragging = null; canvas.style.cursor='default'; delete canvas.dataset.panning; }
+function onWheel(e){ e.preventDefault(); const delta = -e.deltaY * 0.001; const old = cam.scale; cam.scale = Math.max(0.25, Math.min(3, cam.scale*(1+delta))); // zoom to cursor
+  const rect = canvas.getBoundingClientRect(); const mx = e.clientX - rect.left; const my = e.clientY - rect.top; const worldBefore = screenToWorld(mx,my); cam.x += (worldBefore.x - screenToWorld(mx,my).x); cam.y += (worldBefore.y - screenToWorld(mx,my).y); document.getElementById('scaleLabel').textContent = cam.scale.toFixed(2); }
+
+/* ---------- Helper visuals & connections ---------- */
+function addLink(a,b){ if(a===b) return; if(state.links.find(l=> (l.from===a && l.to===b) || (l.from===b && l.to===a))) return; state.links.push({from:a,to:b}); }
+
+/* ---------- Rendering loop ---------- */
+function tick(){ if(runningLayout) stepLayout(); draw(); requestAnimationFrame(tick); }
+
+/* ---------- Highlight in list when selected ---------- */
+function highlightSelection(){ document.querySelectorAll('.item').forEach(it=>{ it.style.outline = (state.selectedId && +it.dataset.id===state.selectedId) ? '2px solid rgba(0,212,255,0.12)' : 'none'; }); }
+
+/* ---------- Save autosave throttling ---------- */
+function saveIfAuto(){ if(state.autosave){ if(autosaveTimer) clearTimeout(autosaveTimer); autosaveTimer = setTimeout(()=>{ saveToLocal(); }, 600); } }
+
+/* ---------- AI-like assistant (rule-based) ---------- */
+function aiAssist(){ if(!state.selectedId) return alert('Select a note to assist'); const note = state.notes.find(n=>n.id===state.selectedId); const text = (note.title+' '+note.content+' '+note.tags).toLowerCase(); const suggestions = [];
+  if(/javascript|js/.test(text)) suggestions.push('Consider adding notes on Event Loop, Async/Await, and Closure examples.');
+  if(/algorithm|data structure|graph/.test(text)) suggestions.push('Add complexity analysis and sample problems; link to related algorithms notes.');
+  if(/css|design/.test(text)) suggestions.push('Include responsive examples and accessible color contrast checks.');
+  if(suggestions.length===0) suggestions.push('Try splitting this note into: Summary, Key Concepts, How to apply, and Further reading.');
+  alert('Assistant suggestions:\n\n' + suggestions.join('\n\n'));
+}
+
+/* ---------- Timeline rendering ---------- */
+function renderTimeline(){ timelineArea.innerHTML=''; const rows = state.notes.slice().sort((a,b)=> new Date(b.updated||b.created) - new Date(a.updated||a.created)); rows.forEach(r=>{ const el = document.createElement('div'); el.className='row'; el.innerHTML = `<div style="font-weight:700">${escapeHtml(r.title||'Untitled')}</div><div style="font-size:12px;opacity:0.8">${r.updated? 'Updated':'Created'} ${new Date(r.updated||r.created).toLocaleString()}</div><div style="margin-top:6px;color:var(--muted);font-size:13px">${escapeHtml((r.content||'').slice(0,200))}</div>`; el.addEventListener('click', ()=> selectNote(r.id)); timelineArea.appendChild(el); }); }
+
+/* ---------- Bind events ---------- */
+canvas.addEventListener('pointerdown', onPointerDown);
+window.addEventListener('pointermove', onPointerMove);
+window.addEventListener('pointerup', onPointerUp);
+canvas.addEventListener('wheel', onWheel,{passive:false});
+
+qInput.addEventListener('input', ()=> renderNotesList(qInput.value));
+newBtn.addEventListener('click', ()=>{ const n = createNote(); selectNote(n.id); renderNotesList(); });
+saveNoteBtn.addEventListener('click', ()=>{ saveNote(); alert('Saved note'); });
+deleteNoteBtn.addEventListener('click', ()=>{ deleteNote(); });
+exportBtn.addEventListener('click', ()=> exportJSON());
+importBtn.addEventListener('click', ()=>{ const txt = prompt('Paste JSON to import'); if(txt) importJSON(txt); });
+viewMode.addEventListener('change', ()=>{ state.view = viewMode.value; if(state.view==='timeline'){ timelineArea.style.display='block'; } else { timelineArea.style.display='none'; } renderAll(); });
+autosaveToggle.addEventListener('click', ()=>{ state.autosave = !state.autosave; autosaveToggle.textContent = 'AutoSave: ' + (state.autosave? 'ON':'OFF'); saveIfAuto(); });
+layoutBtn.addEventListener('click', ()=>{ runningLayout = !runningLayout; layoutBtn.textContent = runningLayout? 'Stop Layout':'Run Layout'; });
+fitBtn.addEventListener('click', ()=> fitToContent());
+connectBtn.addEventListener('click', ()=>{ connectMode = !connectMode; connectBtn.textContent = connectMode? 'Connecting: ON' : 'Connect Mode'; });
+aiSuggestBtn.addEventListener('click', ()=> aiAssist());
+
+// keyboard
+window.addEventListener('keydown',(e)=>{
+  if(e.key==='n' || e.key==='N'){ const n=createNote(); selectNote(n.id); renderNotesList(qInput.value); }
+  if((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='s'){ e.preventDefault(); exportJSON(); }
+  if(e.key==='Delete'){ if(state.selectedId) deleteNote(); }
+});
+
+/* ---------- Layout utilities ---------- */
+function fitToContent(){ if(state.notes.length===0) return; const xs = state.notes.map(n=>n.x); const ys = state.notes.map(n=>n.y); const minx = Math.min(...xs), maxx = Math.max(...xs); const miny=Math.min(...ys), maxy=Math.max(...ys); const w = maxx-minx||400; const h = maxy-miny||300; const scaleX = (canvas.clientWidth-200)/w; const scaleY = (canvas.clientHeight-200)/h; cam.scale = Math.max(0.5, Math.min(2, Math.min(scaleX, scaleY))); cam.x = -(minx + maxx)/2; cam.y = -(miny + maxy)/2; document.getElementById('scaleLabel').textContent = cam.scale.toFixed(2); }
+
+/* ---------- Full render ---------- */
+function renderAll(){ buildIndex(); renderNotesList(qInput.value); renderTimeline(); saveIfAuto(); }
+
+/* ---------- Initialization ---------- */
+function bootstrap(){ // load sample or existing
+  if(!loadFromLocal()){ // sample content
+    const a = createNote(-200,-80,'Learning JavaScript'); a.content = 'Summary: JS is...\n\n**Examples**:\n- Event Loop\n- Promises'; a.tags='#javascript #web'; a.color='#ffb86b';
+    const b = createNote(160,20,'Graph Algorithms'); b.content='Graph traversal, BFS, DFS, Dijkstra.'; b.tags='#algorithms #graphs'; b.color='#7bd389';
+    const c = createNote(20,200,'CSS Layouts'); c.content='Flexbox and Grid patterns.'; c.tags='#css #design'; c.color='#7cc7ff';
+    state.links.push({from:a.id,to:b.id},{from:a.id,to:c.id});
+    saveToLocal();
+  }
+  resizeCanvas(); window.addEventListener('resize', resizeCanvas);
+  renderAll(); requestAnimationFrame(tick);
+}
+
+bootstrap();
+
+/* ---------- Helpers for user guidance (no heavy prompts) ---------- */
+function saveIfAutoConfirmation(){ if(state.autosave) saveToLocal(); }
+
+// Simple initial call to ensure preview updates while editing
+noteContent.addEventListener('input', renderPreview);
+
+</script>
+</body>
+</html>
